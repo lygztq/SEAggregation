@@ -12,7 +12,7 @@ from typing_extensions import final
 from utils import get_stats
 from models import HighOrderGCN, SEAggrNet
 
-d_name = "pubmed".lower()
+d_name = "cora".lower()
 default_hyperparams = {
     "dataset": "{}".format(d_name),
     "data_dir": "./dataset/citation/{}".format(d_name),
@@ -20,8 +20,8 @@ default_hyperparams = {
 
     "num_layers": 2,
     "dropout": 0.8,
-    "hidden": 64,
-    "K": 16,
+    "hidden": 32,
+    "K": 32,
     "res_connect": True,
     "res_scale": 0.1,
     "gc_type": "se-aggregation-m",
