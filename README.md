@@ -18,4 +18,4 @@ Run
 python citation.py
 ```
 
-You can change hyperparameters in this script `citation.py`.
+You can change hyper-parameters and datasets in `citation.py`.
