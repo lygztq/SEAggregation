@@ -1,6 +1,8 @@
 # SE Aggregation
 
-This is the code for Rethinking High-order Graph Convolutional Networks
+![](imgs/model.png)
+
+This is the implementation for Rethinking High-order Graph Convolutional Networks.
 
 Here we show the codes for citation networks as an example.
 
