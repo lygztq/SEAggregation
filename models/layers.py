@@ -5,7 +5,8 @@ from torch.nn import Parameter, init
 # from dgl.nn.conv import GraphConv
 from dgl.nn.pytorch.conv import GraphConv
 
-__all__ = ["_SEAggregation", "SEAggregation", "MLPLayer"]
+__all__ = ["_SEAggregation", "SEAggregation", "MLPLayer", "TransAggregation"]
+
 
 class _SEAggregation(nn.Module):
     r"""The basic graph convolutional layer (squeeze and excitation version)
@@ -160,13 +161,27 @@ class SEAggregation(nn.Module):
             init.zeros_(self.e_bias1)
             init.zeros_(self.e_bias2)
 
-    def forward(self, graph, n_feat):
+    def forward(self, graph, n_feat, ablation_type=None, ablation_attr=None):
         # aggregation
         aggr_results = [n_feat]
         for _ in range(self.K):
             aggr_results.append( (1 - self.init_weight) * self.gc(graph, aggr_results[-1]) + self.init_weight * n_feat)
         stack_result = torch.stack(aggr_results, dim=-1) # N x in_dim x (K+1)
 
+        if ablation_type == "poly":
+            base = ablation_attr["base"]
+            scale = ablation_attr["scale"]
+            weights = torch.ones(self.K + 1, dtype=n_feat.dtype, device=n_feat.device)
+            weights[1:] *= scale
+            weights = torch.cumprod(weights, 0)
+            weights = weights * base
+            out = (stack_result * weights).sum(dim=-1)
+            return out
+        elif ablation_type == "const":
+            return stack_result.mean(dim=-1)
+        elif ablation_type == "random":
+            weights = torch.rand(self.K + 1, dtype=n_feat.dtype, device=n_feat.device)
+            return (stack_result * weights).sum(dim=-1)
         # squeeze and excitation
         if self.mode == "att":
             squeeze_result = torch.matmul(stack_result.transpose(-1, -2), self.e_att).squeeze() # N x (k+1)
@@ -184,6 +199,65 @@ class SEAggregation(nn.Module):
         excitation_result = F.normalize(excitation_result, dim=-1).view(-1, 1, self.K + 1)
         out = (stack_result * excitation_result).sum(dim=-1)
         
+        return out
+
+
+class TransAggregation(nn.Module):
+    r"""The basic graph convolutional layer (Transformer Encoder version)
+
+    Args:
+        in_dim (int): Size of each input sample.
+        K (int): Number of hops :math:`K`.
+        num_heads (int, optional): Number of heads of the encoder layer of transformer.
+            (default: 1)
+        mode (str, optional): Could be 'pool' or 'att'. If 'pool', use mean pooling,
+            else, use attention vector
+            (default: 'pool')
+        init_weight (float, optional): Weigth for add init feature
+            (default: 0.9)
+        normalize (str, optional): Whether to add self-loops and apply
+            symmetric normalization. (default: :obj:`"both"`)
+        dropout (float, optional): Dropout rate for the transformer encoder.
+            (default: 0.1)
+        bias (bool, optional): If set to :obj:`False`, the layer will not learn
+            an additive bias. (default: :obj:`False`)
+    """
+    def __init__(self, in_dim, K, num_heads=1,
+                 init_weight=0.9, normalize="both",
+                 dropout=0.1, bias=False):
+        super(TransAggregation, self).__init__()
+        self.in_dim = in_dim
+        self.K = K
+        self.bias = bias
+        self.num_heads = num_heads
+        self.init_weight = init_weight
+
+        self.weight = Parameter(torch.Tensor(K + 1))
+        self.gc = GraphConv(in_dim, in_dim, norm=normalize, weight=False, bias=False)
+        # self.trans = nn.TransformerEncoderLayer(in_dim, num_heads, dim_feedforward=in_dim, dropout=dropout)
+        self.att = nn.MultiheadAttention(in_dim, num_heads, dropout=dropout, bias=bias)
+
+        self.init_parameter()
+
+    def init_parameter(self):
+        init.uniform_(self.weight)
+
+    def forward(self, graph, n_feat):
+        # aggregation
+        aggr_results = [n_feat]
+        for _ in range(self.K):
+            aggr_results.append( (1 - self.init_weight) * self.gc(graph, aggr_results[-1]) + self.init_weight * n_feat)
+        stack_result = torch.stack(aggr_results) # (K+1) x N x in_dim
+        S, N, D = stack_result.shape
+
+        # trans_result = self.trans(stack_result) # (K+1) x N x in_dim
+        att = self.att(torch.ones_like(stack_result), stack_result, stack_result)[0] # (K+1) x N x in_dim
+        att = att.sum(dim=-1).transpose(0, 1) # N x (K+1)
+        att = F.normalize(att, dim=-1) # N x (K+1)
+
+        # out = (torch.reshape(trans_result, (N, D, S)) * self.weight).sum(dim=-1)
+        # out = (att * stack_result).sum(dim=0)
+        out = (att.unsqueeze(-1) * stack_result.transpose(0, 1)).sum(dim=1)
         return out
 
 

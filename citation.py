@@ -47,7 +47,7 @@ default_hyperparams = {
         "base": 1.0,
         "scale": 0.9
     },
-    "double_update": False
+    "double_update": True
 }
 if not os.path.exists(default_hyperparams["output_dir"]):
     os.makedirs(default_hyperparams["output_dir"])

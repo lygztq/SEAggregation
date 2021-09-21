@@ -5,7 +5,7 @@ import dgl
 import torch.nn as nn
 from .layers import *
 
-__all__ = ["HighOrderGCN", "SEAggrNet"]
+__all__ = ["HighOrderGCN", "SEAggrNet", "TransAggrNet"]
 
 class SEAggrNet(nn.Module):
     def __init__(self, in_dim, out_dim, hidden, K,
@@ -23,7 +23,35 @@ class SEAggrNet(nn.Module):
         self.gc = SEAggregation(
             out_dim, K, excitation_rate=excitation_rate, bias=bias,
             init_weight=init_weight, mode=mode)
-    def forward(self, graph, n_feat, softmax=True):
+    
+    def reset_mlp(self):
+        for layer in self.mlp:
+            layer.reset_parameters()
+
+    def forward(self, graph, n_feat, softmax=True, ablation_type=None, ablation_attr=None):
+        for i, layer in enumerate(self.mlp):
+            n_feat = layer(n_feat)
+        feats = self.gc(graph, n_feat, ablation_type=ablation_type, ablation_attr=ablation_attr)
+        return feats if not softmax else F.log_softmax(feats, dim=1)
+
+
+class TransAggrNet(nn.Module):
+    def __init__(self, in_dim, out_dim, hidden, K, num_heads=1,
+                 init_weight=0.9, batchnorm=False,
+                 dropout=.6, bias=False):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.hidden = hidden
+        self.K = K
+
+        self.mlp = nn.ModuleList()
+        self.mlp.append(MLPLayer(in_dim, hidden, bias=bias, activation=F.relu, batchnorm=batchnorm, dropout=dropout))
+        self.mlp.append(MLPLayer(hidden, out_dim, bias=bias, activation=None, dropout=dropout))
+        # self.mlp.append(MLPLayer(in_dim, out_dim, bias=bias, activation=None, dropout=dropout))
+        self.gc = TransAggregation(out_dim, K, num_heads=num_heads, init_weight=init_weight, dropout=dropout, bias=bias)
+    
+    def forward(self, graph, n_feat, softmax=True, ablation_type=None, ablation_attr=None):
         for i, layer in enumerate(self.mlp):
             n_feat = layer(n_feat)
         feats = self.gc(graph, n_feat)
